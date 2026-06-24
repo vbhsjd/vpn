@@ -1,0 +1,136 @@
+#!/usr/bin/expect -f
+
+set timeout 20
+
+if {[llength $argv] < 3} {
+    puts "Usage: $argv0 <profile_name> <username> <password>"
+    exit 1
+}
+
+set profile [lindex $argv 0]
+set user [lindex $argv 1]
+set pass [lindex $argv 2]
+set profile_menu_index ""
+set profile_candidate_indexes {}
+set user_sent 0
+set pass_sent 0
+set connect_success 0
+set menu_scan_timeout 10
+
+proc fail {message} {
+    puts $message
+    exit 1
+}
+
+if {[info exists env(UNIVPN_HOME)] && $env(UNIVPN_HOME) ne ""} {
+    set env(HOME) $env(UNIVPN_HOME)
+} else {
+    set env(HOME) /root
+}
+set env(USER) root
+set env(LOGNAME) root
+if {[info exists env(UNIVPN_HOME)] && $env(UNIVPN_HOME) ne ""} {
+    set env(XDG_CONFIG_HOME) "$env(UNIVPN_HOME)/.config"
+} else {
+    set env(XDG_CONFIG_HOME) /root/.config
+}
+set env(LD_LIBRARY_PATH) /usr/local/UniVPN/lib:/usr/local/UniVPN/serviceclient
+
+if {[info exists env(UNIVPN_MENU_SCAN_TIMEOUT)] && $env(UNIVPN_MENU_SCAN_TIMEOUT) ne ""} {
+    set menu_scan_timeout $env(UNIVPN_MENU_SCAN_TIMEOUT)
+}
+
+set univpncs_bin "/usr/local/UniVPN/serviceclient/UniVPNCS"
+if {[info exists env(UNIVPNCS_BIN)] && $env(UNIVPNCS_BIN) ne ""} {
+    set univpncs_bin $env(UNIVPNCS_BIN)
+}
+
+spawn $univpncs_bin
+
+expect {
+    "Welcome to UniVPN!" {}
+    timeout { fail "UniVPNCS 启动超时" }
+    eof { fail "UniVPNCS 启动异常退出" }
+}
+
+set timeout $menu_scan_timeout
+expect {
+    -re {([0-9]+):([^\r\n]+)} {
+        set menu_index $expect_out(1,string)
+        set menu_label [string trim $expect_out(2,string)]
+        if {$menu_label eq $profile} {
+            set profile_menu_index $menu_index
+        } elseif {$menu_index > 2} {
+            lappend profile_candidate_indexes $menu_index
+        }
+        exp_continue
+    }
+    timeout {}
+    eof {}
+}
+set timeout 20
+
+if {$profile_menu_index eq ""} {
+    set unique_profile_candidates [lsort -unique $profile_candidate_indexes]
+    if {[llength $unique_profile_candidates] == 1} {
+        set profile_menu_index [lindex $unique_profile_candidates 0]
+    } else {
+        fail "未找到连接配置: $profile"
+    }
+}
+
+send "$profile_menu_index\r"
+
+expect {
+    "1:Connect" { send "1\r" }
+    timeout { fail "未进入连接菜单" }
+    eof { fail "连接菜单异常退出" }
+}
+
+expect {
+    "Connect success." { exp_continue }
+    "Please input the login user name" {
+        send "$user\r"
+        set user_sent 1
+        exp_continue
+    }
+    "Please input the login user password" {
+        send "$pass\r"
+        set pass_sent 1
+        exp_continue
+    }
+    "Successful login." { exp_continue }
+    "Succeeded in enabling network extension." {
+        set connect_success 1
+        set timeout -1
+        exp_continue
+    }
+    "Connect Success,Enjoy!(^_^)" {
+        set connect_success 1
+        set timeout -1
+        exp_continue
+    }
+    "q:Disconnect" {
+        set connect_success 1
+        set timeout -1
+        exp_continue
+    }
+    "Authentication failed." { fail "UniVPN 认证失败" }
+    "ssl connect failed! reason: login failed" { fail "UniVPN 认证失败" }
+    "Connection attempts timed out due to a configuration or network fault." { fail "UniVPN 连接超时" }
+    "Welcome to UniVPN!" {
+        if {$connect_success} {
+            exit 0
+        }
+        exp_continue
+    }
+    eof {
+        if {$connect_success} {
+            exit 0
+        }
+        fail "UniVPNCS 连接流程异常退出"
+    }
+    timeout {
+        fail "UniVPNCS 连接流程超时"
+    }
+}

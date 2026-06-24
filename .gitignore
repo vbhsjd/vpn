@@ -1,0 +1,9 @@
+.worktrees/
+.env
+*.log
+*.tar
+*.tar.gz
+*.tgz
+*.run
+/delivery/**/logs/
+/delivery/**/config/

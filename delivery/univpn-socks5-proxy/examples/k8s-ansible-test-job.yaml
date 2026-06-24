@@ -1,0 +1,80 @@
+# Ansible 连通性测试 Job — 通过 univpn-socks5-proxy 验证 SOCKS5 代理
+# 填写 TARGET_HOST 后 apply
+# Usage: kubectl apply -f k8s-ansible-test-job.yaml -n res
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ansible-test-inventory
+  namespace: res
+data:
+  hosts: |
+    [test]
+    target ansible_host=<TARGET_HOST_IP>
+
+    [test:vars]
+    ansible_user=<SSH_USER>
+    ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="nc -x univpn-socks5-proxy-svc:1080 %h %p"'
+
+  ansible.cfg: |
+    [defaults]
+    host_key_checking = False
+    timeout = 30
+
+    [ssh_connection]
+    ssh_args = -o StrictHostKeyChecking=no -o ProxyCommand="nc -x univpn-socks5-proxy-svc:1080 %h %p"
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ansible-socks5-test
+  namespace: res
+  labels:
+    app: ansible-socks5-test
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ansible
+          image: ubuntu:22.04
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "=== 安装依赖 ==="
+              apt-get update -q && apt-get install -y -q ansible netcat-openbsd openssh-client
+
+              echo "=== 配置 ansible ==="
+              mkdir -p /etc/ansible
+              cp /inventory/ansible.cfg /etc/ansible/ansible.cfg
+
+              echo "=== 测试1: SOCKS5 代理端口连通性 ==="
+              nc -x univpn-socks5-proxy-svc:1080 -zv "${TARGET_HOST}" "${TARGET_PORT:-22}" \
+                && echo "SOCKS5 TCP 连通 OK" \
+                || echo "SOCKS5 TCP 连通 FAIL"
+
+              echo "=== 测试2: Ansible ping ==="
+              ansible -i /inventory/hosts test -m ping \
+                && echo "Ansible ping OK" \
+                || echo "Ansible ping FAIL (可能需要 SSH key)"
+
+              echo "=== 完成 ==="
+          env:
+            - name: TARGET_HOST
+              value: "<TARGET_HOST_IP>"
+            - name: TARGET_PORT
+              value: "22"
+            - name: ANSIBLE_HOST_KEY_CHECKING
+              value: "False"
+          volumeMounts:
+            - name: inventory
+              mountPath: /inventory
+      volumes:
+        - name: inventory
+          configMap:
+            name: ansible-test-inventory

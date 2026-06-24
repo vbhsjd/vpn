@@ -1,0 +1,122 @@
+#!/usr/bin/expect -f
+
+set timeout 20
+
+if {[llength $argv] < 3} {
+    puts "Usage: $argv0 <server> <username> <password> ?port? ?profile_name?"
+    exit 1
+}
+
+set server [lindex $argv 0]
+set user [lindex $argv 1]
+set pass [lindex $argv 2]
+set port [lindex $argv 3]
+set profile [lindex $argv 4]
+
+if {$port eq ""} {
+    set port "443"
+}
+
+if {$profile eq ""} {
+    set profile $server
+}
+
+proc fail {message} {
+    puts $message
+    exit 1
+}
+
+if {[info exists env(UNIVPN_HOME)] && $env(UNIVPN_HOME) ne ""} {
+    set env(HOME) $env(UNIVPN_HOME)
+} else {
+    set env(HOME) /root
+}
+set env(LD_LIBRARY_PATH) /usr/local/UniVPN/lib:/usr/local/UniVPN/serviceclient
+
+spawn /usr/local/UniVPN/serviceclient/UniVPNCS
+
+expect {
+    "Welcome to UniVPN!" {}
+    timeout { fail "UniVPNCS 启动超时" }
+}
+
+expect {
+    "1:New Connection" { send "1\r" }
+    timeout { fail "未进入连接创建菜单" }
+}
+
+expect {
+    "Please choose Connection Type" { send "1\r" }
+    timeout { fail "未进入连接类型菜单" }
+}
+
+expect {
+    "SSL Configuration" {}
+    timeout { fail "未进入 SSL 配置菜单" }
+}
+
+expect {
+    -re {1:Connection Name\(Required\):.*} {}
+    -re {1:Connection Name\(can not modify\):.*} {}
+    timeout { fail "未找到连接名称字段" }
+}
+send "1\r"
+
+expect {
+    "Please Input Connection Name" { send "$profile\r" }
+    "Connection Name can not modify" {}
+    timeout { fail "设置连接名称失败" }
+}
+
+expect {
+    -re {3:Gateway Address\(Required\):.*} {}
+    timeout { fail "未找到网关地址字段" }
+}
+send "3\r"
+
+expect {
+    "Please Input Gateway Address" { send "$server\r" }
+    timeout { fail "设置网关地址失败" }
+}
+
+if {$port ne "443"} {
+    expect {
+        -re {4:.*} { send "4\r" }
+        timeout {}
+    }
+
+    expect {
+        "Please Input Port(1-65535)" { send "$port\r" }
+        timeout {}
+    }
+}
+
+expect {
+    "7:Save" { send "7\r" }
+    timeout { fail "未找到保存入口" }
+}
+
+expect {
+    "Error:Save error." { fail "保存配置失败" }
+    "Welcome to UniVPN!" {}
+    timeout { fail "保存配置超时" }
+}
+
+expect {
+    "Please input the login user name" {
+        send "$user\r"
+        exp_continue
+    }
+    "Please input the login user password" {
+        send "$pass\r"
+        exp_continue
+    }
+    "Authentication failed." { fail "UniVPN 认证失败" }
+    "Connection attempts timed out due to a configuration or network fault." { fail "UniVPN 连接超时" }
+    "Welcome to UniVPN!" {
+        send "2\r"
+        exp_continue
+    }
+    eof {}
+    timeout {}
+}
