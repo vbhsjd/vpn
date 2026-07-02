@@ -1,0 +1,143 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: univpn-secret-example
+  labels:
+    app: univpn-sidecar
+type: Opaque
+stringData:
+  VPN_SERVER: "vpn.example.com"
+  VPN_PORT: "443"
+  VPN_USER: "your-vpn-username"
+  VPN_PASSWORD: "your-vpn-password"
+  VPN_PROFILE_NAME: "office"
+  # Optional fast path: inject a prebuilt profile instead of bootstrapping at startup.
+  VPN_CONFIG_B64: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: univpn-sidecar
+  labels:
+    app: univpn-sidecar
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: univpn-sidecar
+  template:
+    metadata:
+      labels:
+        app: univpn-sidecar
+    spec:
+      containers:
+        - name: univpn
+          image: univpn-sidecar:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+                - SYS_MODULE
+          env:
+            - name: TZ
+              value: "Asia/Shanghai"
+            - name: VPN_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: univpn-secret-example
+                  key: VPN_SERVER
+            - name: VPN_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: univpn-secret-example
+                  key: VPN_PORT
+            - name: VPN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: univpn-secret-example
+                  key: VPN_USER
+            - name: VPN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: univpn-secret-example
+                  key: VPN_PASSWORD
+            - name: VPN_PROFILE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: univpn-secret-example
+                  key: VPN_PROFILE_NAME
+            - name: VPN_CONFIG_B64
+              valueFrom:
+                secretKeyRef:
+                  name: univpn-secret-example
+                  key: VPN_CONFIG_B64
+                  optional: true
+            - name: UNIVPN_CONNECT_TIMEOUT
+              value: "120"
+            - name: UNIVPN_READY_POLL_INTERVAL
+              value: "1"
+            - name: UNIVPN_MENU_SCAN_TIMEOUT
+              value: "2"
+            - name: UNIVPN_IMPORTED_PROFILE_SETTLE_SECONDS
+              value: "0"
+            - name: UNIVPN_BOOTSTRAP_PROFILE
+              value: "true"
+            - name: UNIVPN_REQUIRE_TUN
+              value: "true"
+          startupProbe:
+            exec:
+              command:
+                - /usr/local/bin/healthcheck.sh
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - /usr/local/bin/healthcheck.sh
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /usr/local/bin/healthcheck.sh
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "192Mi"
+            limits:
+              cpu: "500m"
+              memory: "384Mi"
+          volumeMounts:
+            - name: dev-net
+              mountPath: /dev/net
+            - name: vpn-config
+              mountPath: /usr/local/UniVPN/config
+            - name: vpn-logs
+              mountPath: /usr/local/UniVPN/log
+            - name: lib-modules
+              mountPath: /lib/modules
+              readOnly: true
+      volumes:
+        - name: dev-net
+          hostPath:
+            path: /dev/net
+            type: DirectoryOrCreate
+        - name: vpn-config
+          emptyDir: {}
+        - name: vpn-logs
+          emptyDir: {}
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+            type: Directory

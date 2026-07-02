@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: univpn-config-example
+  labels:
+    app: univpn-sidecar-example
+data:
+  VPN_SERVER: "vpn.example.com"
+  VPN_PORT: "443"
+  VPN_PROFILE_NAME: "office"
+  UNIVPN_CONNECT_TIMEOUT: "120"
+  UNIVPN_ENABLE_VNC: "false"
+  UNIVPN_ALLOW_MANUAL_CONFIG: "false"
+  UNIVPN_CLI_ONLY: "true"
+  UNIVPN_REQUIRE_TUN: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: univpn-secret-example
+  labels:
+    app: univpn-sidecar-example
+type: Opaque
+stringData:
+  VPN_USER: "your-vpn-username"
+  VPN_PASSWORD: "your-vpn-password"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: univpn-sidecar-initcontainer-example
+  labels:
+    app: univpn-sidecar-example
+spec:
+  restartPolicy: Never
+  initContainers:
+    - name: univpn
+      image: univpn-sidecar:latest
+      imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      securityContext:
+        privileged: true
+        capabilities:
+          add:
+            - NET_ADMIN
+            - NET_RAW
+            - SYS_MODULE
+      env:
+        - name: TZ
+          value: Asia/Shanghai
+        - name: VPN_SERVER
+          valueFrom:
+            configMapKeyRef:
+              name: univpn-config-example
+              key: VPN_SERVER
+        - name: VPN_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: univpn-config-example
+              key: VPN_PORT
+        - name: VPN_PROFILE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: univpn-config-example
+              key: VPN_PROFILE_NAME
+        - name: VPN_USER
+          valueFrom:
+            secretKeyRef:
+              name: univpn-secret-example
+              key: VPN_USER
+        - name: VPN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: univpn-secret-example
+              key: VPN_PASSWORD
+        - name: UNIVPN_CONNECT_TIMEOUT
+          valueFrom:
+            configMapKeyRef:
+              name: univpn-config-example
+              key: UNIVPN_CONNECT_TIMEOUT
+      volumeMounts:
+        - name: dev-net
+          mountPath: /dev/net
+        - name: vpn-config
+          mountPath: /usr/local/UniVPN/config
+        - name: vpn-logs
+          mountPath: /usr/local/UniVPN/log
+        - name: lib-modules
+          mountPath: /lib/modules
+          readOnly: true
+    - name: wait-vpn-ready
+      image: busybox:1.36
+      imagePullPolicy: IfNotPresent
+      command:
+        - sh
+        - -c
+        - >-
+          i=0; until ip r | grep -q 'cnem_vnic'; do i=$((i+1)); if [ "$i" -ge 60 ]; then echo 'VPN tunnel route not ready'; ip r; exit 1; fi; echo 'Waiting for VPN tunnel route...'; sleep 1; done; echo 'VPN tunnel route ready:'; ip r
+  containers:
+    - name: app
+      image: busybox:1.36
+      imagePullPolicy: IfNotPresent
+      command:
+        - sh
+        - -c
+        - echo "VPN is ready; replace this container with the real workload"; sleep 3600
+  volumes:
+    - name: dev-net
+      hostPath:
+        path: /dev/net
+        type: DirectoryOrCreate
+    - name: vpn-config
+      emptyDir: {}
+    - name: vpn-logs
+      emptyDir: {}
+    - name: lib-modules
+      hostPath:
+        path: /lib/modules
+        type: Directory

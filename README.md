@@ -1,41 +1,59 @@
-# UniVPN SOCKS5 Proxy Container
+# UniVPN Sidecar Container
 
-This repository packages a UniVPN client into a container that exposes a local SOCKS5 proxy. It is intended for Kubernetes sidecar or standalone proxy scenarios where outbound traffic must traverse UniVPN.
+This repository packages a UniVPN Linux client into a container image for
+Kubernetes workloads that need a VPN tunnel before the main workload starts.
+The public source focuses on the single-VPN sidecar/initContainer flow that is
+used in production-like Kubernetes Jobs.
+
+## What It Provides
+
+- A lightweight UniVPN CLI container with no desktop, VNC, or multi-VPN logic.
+- Fast profile startup from `VPN_SERVER`, `VPN_PORT`, and `VPN_PROFILE_NAME`.
+- Optional profile preload via mounted `.ini` files or `VPN_CONFIG_B64`.
+- Kubernetes sidecar initContainer examples for workloads that need the tunnel.
+- Graceful shutdown support: when Kubernetes stops the container, the wrapper
+  sends `q` to `UniVPNCS` before falling back to process termination.
 
 ## Layout
 
-- `delivery/univpn-socks5-proxy/`: Docker build files, runtime scripts, health checks, and Kubernetes examples.
-- `docs/superpowers/`: design notes and implementation history.
+- `delivery/univpn-sidecar-single-vpn-minimal/`: Docker build files, runtime
+  scripts, health checks, and Kubernetes examples for the sidecar image.
 
 ## Third-Party Binary Notice
 
-The UniVPN Linux installer is a third-party binary and is not redistributed in this repository. To build the image, place the vendor-provided installer at:
+The UniVPN Linux installer is a third-party binary and is not redistributed in
+this repository. To build the image, place the vendor-provided installer at:
 
 ```text
-delivery/univpn-socks5-proxy/univpn-linux-64-10781.18.1.0512.run
+delivery/univpn-sidecar-single-vpn-minimal/univpn-linux-64-10781.18.1.0512.run
 ```
+
+The MIT license in this repository applies to the scripts, manifests, and
+documentation here. It does not grant rights to redistribute the UniVPN client.
 
 ## Quick Start
 
 ```bash
-cd delivery/univpn-socks5-proxy
+cd delivery/univpn-sidecar-single-vpn-minimal
 cp examples/.env.example .env
 ./build.sh dev
-docker run -d --name univpn-proxy-test \
+docker run -d --name univpn-sidecar-test \
   --privileged \
   --cap-add NET_ADMIN \
-  --device /dev/net/tun \
+  --cap-add NET_RAW \
+  --cap-add SYS_MODULE \
+  --device /dev/net/tun:/dev/net/tun \
   --env-file .env \
-  -p 1080:1080 \
-  univpn-socks5-proxy:dev
+  univpn-sidecar:dev
 ```
 
-## Notes
+For Kubernetes examples, see:
 
-- The current delivery flow targets `linux/amd64`.
-- Kubernetes deployments require `/dev/net/tun` plus `NET_ADMIN`.
-- Do not commit real VPN credentials, generated profiles, vendor installers, or runtime logs.
+- `delivery/univpn-sidecar-single-vpn-minimal/k8s-res-univpn.yaml`
+- `delivery/univpn-sidecar-single-vpn-minimal/k8s-sidecar-initcontainer-example.yaml`
 
-## Status
+## Safety Notes
 
-The current public focus is the single-container SOCKS5 proxy flow under `delivery/univpn-socks5-proxy`. Local-only tarballs and other packaging artifacts are intentionally excluded from version control.
+Do not commit real VPN credentials, generated profiles, vendor installers,
+runtime logs, or local image tarballs. Keep real configuration in Kubernetes
+Secrets, private `.env` files, or your own secret manager.

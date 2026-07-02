@@ -1,6 +1,6 @@
 #!/usr/bin/expect -f
 
-set timeout 20
+set timeout 12
 
 if {[llength $argv] < 3} {
     puts "Usage: $argv0 <profile_name> <username> <password>"
@@ -12,32 +12,50 @@ set user [lindex $argv 1]
 set pass [lindex $argv 2]
 set profile_menu_index ""
 set profile_candidate_indexes {}
-set user_sent 0
-set pass_sent 0
 set connect_success 0
-set menu_scan_timeout 10
+set disconnect_requested 0
+set graceful_disconnect_wait 3
+set menu_scan_timeout 2
 
 proc fail {message} {
     puts $message
     exit 1
 }
 
-if {[info exists env(UNIVPN_HOME)] && $env(UNIVPN_HOME) ne ""} {
-    set env(HOME) $env(UNIVPN_HOME)
-} else {
-    set env(HOME) /root
+proc graceful_disconnect {} {
+    global connect_success disconnect_requested graceful_disconnect_wait
+
+    if {$disconnect_requested} {
+        exit 0
+    }
+
+    set disconnect_requested 1
+
+    if {$connect_success} {
+        puts "Termination requested, sending q to disconnect UniVPN..."
+        catch { send "q\r" }
+        catch { sleep $graceful_disconnect_wait }
+    }
+
+    exit 0
 }
+
+trap {graceful_disconnect} {SIGTERM SIGINT}
+
+set env(HOME) /root
 set env(USER) root
 set env(LOGNAME) root
-if {[info exists env(UNIVPN_HOME)] && $env(UNIVPN_HOME) ne ""} {
-    set env(XDG_CONFIG_HOME) "$env(UNIVPN_HOME)/.config"
-} else {
-    set env(XDG_CONFIG_HOME) /root/.config
-}
+set env(XDG_CONFIG_HOME) /root/.config
 set env(LD_LIBRARY_PATH) /usr/local/UniVPN/lib:/usr/local/UniVPN/serviceclient
 
+if {[info exists env(UNIVPN_CONNECT_EXPECT_TIMEOUT)] && $env(UNIVPN_CONNECT_EXPECT_TIMEOUT) ne ""} {
+    set timeout $env(UNIVPN_CONNECT_EXPECT_TIMEOUT)
+}
 if {[info exists env(UNIVPN_MENU_SCAN_TIMEOUT)] && $env(UNIVPN_MENU_SCAN_TIMEOUT) ne ""} {
     set menu_scan_timeout $env(UNIVPN_MENU_SCAN_TIMEOUT)
+}
+if {[info exists env(UNIVPN_DISCONNECT_WAIT)] && $env(UNIVPN_DISCONNECT_WAIT) ne ""} {
+    set graceful_disconnect_wait $env(UNIVPN_DISCONNECT_WAIT)
 }
 
 set univpncs_bin "/usr/local/UniVPN/serviceclient/UniVPNCS"
@@ -49,8 +67,8 @@ spawn $univpncs_bin
 
 expect {
     "Welcome to UniVPN!" {}
-    timeout { fail "UniVPNCS 启动超时" }
-    eof { fail "UniVPNCS 启动异常退出" }
+    timeout { fail "UniVPNCS startup timed out" }
+    eof { fail "UniVPNCS exited before menu was shown" }
 }
 
 set timeout $menu_scan_timeout
@@ -68,14 +86,14 @@ expect {
     timeout {}
     eof {}
 }
-set timeout 20
+set timeout 12
 
 if {$profile_menu_index eq ""} {
     set unique_profile_candidates [lsort -unique $profile_candidate_indexes]
     if {[llength $unique_profile_candidates] == 1} {
         set profile_menu_index [lindex $unique_profile_candidates 0]
     } else {
-        fail "未找到连接配置: $profile"
+        fail "Profile not found: $profile"
     }
 }
 
@@ -83,20 +101,17 @@ send "$profile_menu_index\r"
 
 expect {
     "1:Connect" { send "1\r" }
-    timeout { fail "未进入连接菜单" }
-    eof { fail "连接菜单异常退出" }
+    timeout { fail "Connect action menu not reached" }
+    eof { fail "Connection menu exited unexpectedly" }
 }
 
 expect {
-    "Connect success." { exp_continue }
     "Please input the login user name" {
         send "$user\r"
-        set user_sent 1
         exp_continue
     }
     "Please input the login user password" {
         send "$pass\r"
-        set pass_sent 1
         exp_continue
     }
     "Successful login." { exp_continue }
@@ -115,22 +130,20 @@ expect {
         set timeout -1
         exp_continue
     }
-    "Authentication failed." { fail "UniVPN 认证失败" }
-    "ssl connect failed! reason: login failed" { fail "UniVPN 认证失败" }
-    "Connection attempts timed out due to a configuration or network fault." { fail "UniVPN 连接超时" }
-    "Welcome to UniVPN!" {
-        if {$connect_success} {
-            exit 0
-        }
-        exp_continue
-    }
+    "Authentication failed." { fail "UniVPN authentication failed" }
+    "ssl connect failed! reason: login failed" { fail "UniVPN authentication failed" }
+    "ssl connect failed! reason: first connect failed" { fail "UniVPN first connect failed" }
+    "Connection attempts timed out due to a configuration or network fault." { fail "UniVPN connection timed out" }
     eof {
         if {$connect_success} {
             exit 0
         }
-        fail "UniVPNCS 连接流程异常退出"
+        fail "UniVPNCS exited before the tunnel was established"
     }
     timeout {
-        fail "UniVPNCS 连接流程超时"
+        if {$connect_success} {
+            exp_continue
+        }
+        fail "UniVPN connection flow timed out"
     }
 }

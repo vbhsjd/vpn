@@ -1,0 +1,16 @@
+.env
+*.run
+*.log
+*.tar
+*.tar.gz
+*.tgz
+*.tmp
+logs/
+config/
+log/
+.DS_Store
+.idea/
+.vscode/
+*.iml
+*.core
+*:Zone.Identifier

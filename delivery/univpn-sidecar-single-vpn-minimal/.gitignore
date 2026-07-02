@@ -1,0 +1,13 @@
+.env
+*.run
+*.tar
+*.tar.gz
+*.tgz
+config/*.ini
+config/*.vpn
+config/*.crt
+config/*.key
+logs/*.log
+logs/UniVPN_*
+!config/.gitkeep
+!logs/.gitkeep
