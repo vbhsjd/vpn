@@ -1,37 +1,30 @@
-# UniVPN Sidecar Container
+# UniVPN Sidecar 容器
 
-This repository packages a UniVPN Linux client into a container image for
-Kubernetes workloads that need a VPN tunnel before the main workload starts.
-The public source focuses on the single-VPN sidecar/initContainer flow that is
-used in production-like Kubernetes Jobs.
+本仓库把 UniVPN Linux 命令行客户端打包成容器镜像，适用于主业务容器启动前必须先建立 VPN 隧道的 Kubernetes 工作负载。公开源码只保留当前实际使用的单 VPN sidecar/initContainer 方案。
 
-## What It Provides
+## 提供什么
 
-- A lightweight UniVPN CLI container with no desktop, VNC, or multi-VPN logic.
-- Fast profile startup from `VPN_SERVER`, `VPN_PORT`, and `VPN_PROFILE_NAME`.
-- Optional profile preload via mounted `.ini` files or `VPN_CONFIG_B64`.
-- Kubernetes sidecar initContainer examples for workloads that need the tunnel.
-- Graceful shutdown support: when Kubernetes stops the container, the wrapper
-  sends `q` to `UniVPNCS` before falling back to process termination.
+- 轻量的 UniVPN CLI 容器，不包含桌面、VNC 或多 VPN 逻辑。
+- 支持通过 `VPN_SERVER`、`VPN_PORT` 和 `VPN_PROFILE_NAME` 快速生成连接配置。
+- 支持通过挂载 `.ini` 文件或 `VPN_CONFIG_B64` 预加载配置。
+- 提供 Kubernetes sidecar/initContainer 示例，适合需要等待 VPN 隧道就绪后再启动业务容器的场景。
+- 支持优雅退出：Kubernetes 停止容器时，包装脚本会先向 `UniVPNCS` 发送 `q` 断开连接，然后才回退到进程终止。
 
-## Layout
+## 目录结构
 
-- `delivery/univpn-sidecar-single-vpn-minimal/`: Docker build files, runtime
-  scripts, health checks, and Kubernetes examples for the sidecar image.
+- `delivery/univpn-sidecar-single-vpn-minimal/`：sidecar 镜像的 Docker 构建文件、运行脚本、健康检查和 Kubernetes 示例。
 
-## Third-Party Binary Notice
+## 第三方二进制说明
 
-The UniVPN Linux installer is a third-party binary and is not redistributed in
-this repository. To build the image, place the vendor-provided installer at:
+UniVPN Linux 安装包是第三方二进制文件，本仓库不会重新分发。构建镜像前，请把厂商提供的安装包放到：
 
 ```text
 delivery/univpn-sidecar-single-vpn-minimal/univpn-linux-64-10781.18.1.0512.run
 ```
 
-The MIT license in this repository applies to the scripts, manifests, and
-documentation here. It does not grant rights to redistribute the UniVPN client.
+本仓库的 MIT 许可证只适用于这里的脚本、Kubernetes 清单和文档，不授予重新分发 UniVPN 客户端的权利。
 
-## Quick Start
+## 快速开始
 
 ```bash
 cd delivery/univpn-sidecar-single-vpn-minimal
@@ -47,13 +40,11 @@ docker run -d --name univpn-sidecar-test \
   univpn-sidecar:dev
 ```
 
-For Kubernetes examples, see:
+Kubernetes 示例见：
 
 - `delivery/univpn-sidecar-single-vpn-minimal/k8s-res-univpn.yaml`
 - `delivery/univpn-sidecar-single-vpn-minimal/k8s-sidecar-initcontainer-example.yaml`
 
-## Safety Notes
+## 安全说明
 
-Do not commit real VPN credentials, generated profiles, vendor installers,
-runtime logs, or local image tarballs. Keep real configuration in Kubernetes
-Secrets, private `.env` files, or your own secret manager.
+不要提交真实 VPN 账号密码、生成后的配置、厂商安装包、运行日志或本地镜像压缩包。真实配置应放在 Kubernetes Secret、私有 `.env` 文件或你自己的密钥管理系统中。
